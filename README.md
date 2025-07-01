@@ -1,4 +1,4 @@
-![SQZip](https://raw.githubusercontent.com/QuantumLeapStudios/SQZip/master/Media/sqzip.png)
+![SQZip](https://raw.githubusercontent.com/QuantumLeap-Studios/SQZip/master/Media/sqzip.png)
 
 ## Features
 
