@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Security.Cryptography;
 
 namespace SQZip
 {
@@ -13,6 +14,8 @@ namespace SQZip
         public long CompressedSize;
         public long DataOffset;
         public bool IsCompressed;
+        public bool IsDirectory;
+        public byte[] Hash = Array.Empty<byte>();
     }
 
     public class SqzipArchiver
@@ -20,27 +23,53 @@ namespace SQZip
         public static void CreateSqzip(string sourceFolder, string destinationFile)
         {
             var files = Directory.GetFiles(sourceFolder, "*", SearchOption.AllDirectories);
+            var directories = Directory.GetDirectories(sourceFolder, "*", SearchOption.AllDirectories);
+
             var fileEntries = new List<SqzipFileEntry>();
+
+            foreach (var dir in directories)
+            {
+                var entry = new SqzipFileEntry
+                {
+                    FilePath = Path.GetRelativePath(sourceFolder, dir).Replace("\\", "/") + "/",
+                    FileSize = 0,
+                    CompressedSize = 0,
+                    DataOffset = 0,
+                    IsCompressed = false,
+                    IsDirectory = true,
+                    Hash = new byte[32]   
+                };
+                fileEntries.Add(entry);
+            }
+
+            foreach (var file in files)
+            {
+                var entry = new SqzipFileEntry
+                {
+                    FilePath = Path.GetRelativePath(sourceFolder, file).Replace("\\", "/"),
+                    FileSize = new FileInfo(file).Length,
+                    IsDirectory = false
+                };
+
+                using (var sha256 = SHA256.Create())
+                using (var fs = File.OpenRead(file))
+                {
+                    entry.Hash = sha256.ComputeHash(fs);
+                }
+
+                fileEntries.Add(entry);
+            }
+
+            fileEntries.Sort((a, b) => string.Compare(a.FilePath, b.FilePath, StringComparison.Ordinal));
 
             using (var output = new FileStream(destinationFile, FileMode.Create))
             using (var writer = new BinaryWriter(output, Encoding.UTF8))
             {
                 writer.Write(Encoding.ASCII.GetBytes("SQZIPV01"));
-                writer.Write(0);    
-                writer.Write(0);     
+                writer.Write(0);        
+                writer.Write(0);         
 
                 long fileTableStart = output.Position;
-
-                foreach (var file in files)
-                {
-                    var entry = new SqzipFileEntry
-                    {
-                        FilePath = Path.GetRelativePath(sourceFolder, file).Replace("\\", "/"),
-                        FileSize = new FileInfo(file).Length
-                    };
-
-                    fileEntries.Add(entry);
-                }
 
                 using (var tableStream = new MemoryStream())
                 using (var tableWriter = new BinaryWriter(tableStream, Encoding.UTF8))
@@ -51,9 +80,11 @@ namespace SQZip
                         tableWriter.Write((ushort)pathBytes.Length);
                         tableWriter.Write(pathBytes);
                         tableWriter.Write((long)entry.FileSize);
-                        tableWriter.Write((long)0);     
-                        tableWriter.Write((long)0);     
-                        tableWriter.Write((byte)0);     
+                        tableWriter.Write((long)0);       
+                        tableWriter.Write((long)0);       
+                        tableWriter.Write((byte)(entry.IsCompressed ? 1 : 0));
+                        tableWriter.Write((byte)(entry.IsDirectory ? 1 : 0));
+                        tableWriter.Write(entry.Hash, 0, 32);     
                     }
 
                     byte[] fileTableBytes = tableStream.ToArray();
@@ -62,6 +93,14 @@ namespace SQZip
                     for (int i = 0; i < fileEntries.Count; i++)
                     {
                         var entry = fileEntries[i];
+                        if (entry.IsDirectory)
+                        {
+                            entry.CompressedSize = 0;
+                            entry.DataOffset = 0;
+                            entry.IsCompressed = false;
+                            continue;
+                        }
+
                         entry.DataOffset = output.Position;
 
                         byte[] fileData = File.ReadAllBytes(Path.Combine(sourceFolder, entry.FilePath));
@@ -102,6 +141,8 @@ namespace SQZip
                         writer.Write(entry.CompressedSize);
                         writer.Write(entry.DataOffset);
                         writer.Write((byte)(entry.IsCompressed ? 1 : 0));
+                        writer.Write((byte)(entry.IsDirectory ? 1 : 0));
+                        writer.Write(entry.Hash, 0, 32);
                     }
 
                     output.Seek(8, SeekOrigin.Begin);

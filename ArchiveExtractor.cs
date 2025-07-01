@@ -13,7 +13,7 @@ namespace SQZip
             using (var input = new FileStream(archivePath, FileMode.Open, FileAccess.Read))
             using (var reader = new BinaryReader(input, Encoding.UTF8, leaveOpen: true))
             {
-                if (input.Length < 16)           
+                if (input.Length < 16)
                     throw new Exception("Invalid or corrupted SQZIP archive: file too small.");
 
                 string signature = Encoding.ASCII.GetString(reader.ReadBytes(8));
@@ -45,16 +45,27 @@ namespace SQZip
 
                     string filePath = Encoding.UTF8.GetString(reader.ReadBytes(pathLength));
 
-                    if (input.Position + 25 > fileTableEnd)
+                    if (input.Position + 24 > fileTableEnd)
                         throw new EndOfStreamException($"Unexpected end of file table while reading file entry metadata (file {i}).");
 
                     long fileSize = reader.ReadInt64();
                     long compressedSize = reader.ReadInt64();
                     long dataOffset = reader.ReadInt64();
+
+                    if (input.Position + 1 > fileTableEnd)
+                        throw new EndOfStreamException($"Unexpected end of file table while reading isCompressed (file {i}).");
                     bool isCompressed = reader.ReadByte() == 1;
 
+                    if (input.Position + 1 > fileTableEnd)
+                        throw new EndOfStreamException($"Unexpected end of file table while reading isDirectory (file {i}).");
+                    bool isDirectory = reader.ReadByte() == 1;
+
+                    if (input.Position + 32 > fileTableEnd)
+                        throw new EndOfStreamException($"Unexpected end of file table while reading file hash (file {i}).");
+                    byte[] hash = reader.ReadBytes(32);
+
                     if (fileSize < 0 || compressedSize < 0 || dataOffset < 0)
-                        throw new Exception($"Invalid file metadata (file {i}).");
+                        throw new Exception($"Invalid file metadata (file {i}): fileSize={fileSize}, compressedSize={compressedSize}, dataOffset={dataOffset}");
 
                     fileEntries.Add(new SqzipFileEntry
                     {
@@ -62,41 +73,47 @@ namespace SQZip
                         FileSize = fileSize,
                         CompressedSize = compressedSize,
                         DataOffset = dataOffset,
-                        IsCompressed = isCompressed
+                        IsCompressed = isCompressed,
+                        Hash = hash,
+                        IsDirectory = isDirectory
                     });
                 }
 
                 foreach (var entry in fileEntries)
                 {
                     string outputPath = Path.Combine(destinationFolder, entry.FilePath);
-                    Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? throw new Exception("Invalid output directory."));
 
-                    if (entry.DataOffset < 0 || entry.DataOffset > input.Length)
-                        throw new Exception($"Invalid data offset for file {entry.FilePath}.");
+                    if (entry.IsDirectory)
+                    {
+                        Directory.CreateDirectory(outputPath);
+                        continue;
+                    }
+
+                    Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
 
                     input.Seek(entry.DataOffset, SeekOrigin.Begin);
-
-                    if (entry.CompressedSize > int.MaxValue)
-                        throw new InvalidOperationException($"Compressed file too large to extract in memory: {entry.FilePath}");
-
-                    if (input.Position + entry.CompressedSize > input.Length)
-                        throw new EndOfStreamException($"Unexpected end of archive while reading data for file {entry.FilePath}.");
-
                     byte[] data = reader.ReadBytes((int)entry.CompressedSize);
 
+                    byte[] extractedData;
                     if (entry.IsCompressed)
                     {
-                        using (var compressedStream = new MemoryStream(data))
-                        using (var deflateStream = new DeflateStream(compressedStream, CompressionMode.Decompress))
-                        using (var fileStream = new FileStream(outputPath, FileMode.Create))
-                        {
-                            deflateStream.CopyTo(fileStream);
-                        }
+                        using var compressedStream = new MemoryStream(data);
+                        using var deflateStream = new DeflateStream(compressedStream, CompressionMode.Decompress);
+                        using var ms = new MemoryStream();
+                        deflateStream.CopyTo(ms);
+                        extractedData = ms.ToArray();
                     }
                     else
                     {
-                        File.WriteAllBytes(outputPath, data);
+                        extractedData = data;
                     }
+
+                    File.WriteAllBytes(outputPath, extractedData);
+
+                    using var sha256 = System.Security.Cryptography.SHA256.Create();
+                    var actualHash = sha256.ComputeHash(extractedData);
+                    if (!entry.Hash.AsSpan().SequenceEqual(actualHash))
+                        throw new Exception($"Hash mismatch for file {entry.FilePath}: file may be corrupted.");
                 }
             }
         }
