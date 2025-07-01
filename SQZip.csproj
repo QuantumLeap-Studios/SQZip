@@ -4,6 +4,29 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Title>QuantumLeapStudios.SQZip</Title>
+    <Description>A no compression file type that is extremely simple.</Description>
+    <Copyright>QuantumLeap Studios</Copyright>
+    <PackageProjectUrl>https://quantumleapstudios.org/sqzip/</PackageProjectUrl>
+	  <PackageIcon>Media/sqzipio.png</PackageIcon>
+	  <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/QuantumLeap-Studios/SQZip</RepositoryUrl>
+	<Version>0.0.2</Version>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="Media\sqzipio.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Update="README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include=".github\workflows\nuget.yml" />
+  </ItemGroup>
 
 </Project>
