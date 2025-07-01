@@ -37,7 +37,3 @@
 
 - Extracts all files from the specified `.sqzip` archive into `destinationFolder`.
 - Restores original directory structure.
-
-## License
-
-This project is provided as-is, with no warranty. See source code for details.
